@@ -1,4 +1,6 @@
 .env
+*.pdf
+*.epub
 __pycache__/
 tests/__pycache__/
 output/

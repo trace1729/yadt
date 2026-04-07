@@ -177,6 +177,58 @@ class BookPipelineTests(unittest.TestCase):
         self.assertEqual(result.paths.markdown_path.parent.name, "sample")
         self.assertEqual(result.paths.markdown_path.parent.parent.name, "output")
 
+    def test_run_pipeline_uses_pdf_conversion_for_pdf_inputs(self):
+        module = load_module()
+        events: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "CBP4-TAGE-SC-L.pdf"
+            input_path.write_bytes(b"%PDF-1.4\n")
+
+            paths = module.derive_output_paths(input_path)
+
+            def fake_convert_pdf_to_markdown(source, output, **kwargs):
+                self.assertEqual(source, input_path)
+                self.assertEqual(output, paths.markdown_path)
+                events.append("pdf_to_markdown")
+                output.write_text("# CBP4-TAGE-SC-L\n\nBody.\n", encoding="utf-8")
+
+            def fake_create_client(api_key):
+                self.assertEqual(api_key, "secret")
+                events.append("create_client")
+                return object()
+
+            def fake_run_translation_pipeline(**kwargs):
+                events.append("translate")
+                paths.bilingual_markdown_path.write_text("# Title\n\n# 标题\n", encoding="utf-8")
+
+            def fake_postprocess_markdown(markdown):
+                self.assertIn("# Title", markdown)
+                events.append("postprocess")
+                return "# Title (标题)\n"
+
+            def fake_write_epub(input_markdown_path, output_epub_path, title, author):
+                events.append("markdown_to_epub")
+                self.assertEqual(title, "CBP4-TAGE-SC-L (Bilingual)")
+                self.assertEqual(author, "Unknown Author")
+                output_epub_path.write_bytes(b"epub")
+
+            with patch.object(module, "convert_pdf_to_markdown", side_effect=fake_convert_pdf_to_markdown), patch.object(
+                module, "load_api_key", return_value="secret"
+            ), patch.object(module, "create_client", side_effect=fake_create_client), patch.object(
+                module, "run_translation_pipeline", side_effect=fake_run_translation_pipeline
+            ), patch.object(
+                module, "postprocess_markdown", side_effect=fake_postprocess_markdown
+            ), patch.object(
+                module, "write_epub", side_effect=fake_write_epub
+            ):
+                result = module.run_pipeline(input_path, max_workers=2)
+
+        self.assertEqual(events, ["pdf_to_markdown", "create_client", "translate", "postprocess", "markdown_to_epub"])
+        self.assertEqual(result.metadata.title, "CBP4-TAGE-SC-L")
+        self.assertEqual(result.metadata.author, "Unknown Author")
+
 
 if __name__ == "__main__":
     unittest.main()

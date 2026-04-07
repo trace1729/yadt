@@ -1,11 +1,12 @@
-# YAET: Yet Another epub Translator
+# YAET: Yet Another E-Book Translator
 
-将 EPUB 或 Markdown 书稿转换成中英对照 Markdown，并可重新导出为 EPUB。
+将 EPUB、PDF 或 Markdown 书稿转换成中英对照 Markdown，并可重新导出为 EPUB。
 
 仓库当前提供的是一组小而清晰的脚本：
 
 - `src/run_book_pipeline.py`: 一键执行 `epub -> markdown -> heading fix -> translate -> cleanup -> epub`
 - `src/convert_epub_to_markdown.py`: 将 EPUB 转成 Markdown，并导出图片资源
+- `src/convert_pdf_to_markdown.py`: 通过 MinerU 云 API 将 PDF 转成 Markdown，并导出图片资源
 - `src/translate_markdown_book.py`: 将 Markdown 翻译成中英对照或纯中文 Markdown
 - `src/cleanup_bilingual_markdown.py`: 合并双语标题、更新目录链接、去除重复图片和分隔符
 - `src/fix_special_toc_links.py`: 修复特殊目录链接 edge case，例如 `STATE CHANGE -> #STATE_CHANGE`
@@ -30,14 +31,19 @@ echo 'DEEPSEEK_API_KEY="your_api_key"' > .env
 
 ```bash
 export DEEPSEEK_API_KEY="your_api_key"
+export MINERU_API_KEY="your_mineru_api_key"
 ```
 
 ## Quick Start
 
-完整处理一本 EPUB：
+完整处理一本 EPUB 或 PDF：
 
 ```bash
 ./.venv/bin/python src/run_book_pipeline.py "/path/to/book.epub" --max-workers 16
+```
+
+```bash
+./.venv/bin/python src/run_book_pipeline.py "/path/to/paper.pdf" --max-workers 16
 ```
 
 默认输出会放到：
@@ -75,6 +81,20 @@ output/The_Paper_Menagerie_and_Oth_(Z-Library)/
 - 保留章节层级
 - 导出图片到同目录下的 `<book>_assets/`
 - 自动检测封面图片，包括 `titlepage.xhtml` 中 SVG 引用的 `cover.jpeg`
+
+### 1b. PDF -> Markdown
+
+```bash
+./.venv/bin/python src/convert_pdf_to_markdown.py "/path/to/paper.pdf"
+```
+
+默认行为：
+
+- 使用 `.env` 或环境变量中的 `MINERU_API_KEY`
+- 调用 MinerU 云 API 解析 PDF
+- 输出到 `output/<book>/<book>.md`
+- 自动把 zip 结果中的图片提取到 `<book>_assets/`
+- 自动把 Markdown 中的 `images/...` 引用改写为本地资源路径
 
 ### 2. Fix Special TOC Links
 
@@ -181,7 +201,7 @@ output/<book>/<book>.translation_cache.json
 
 ## Recommended Workflow
 
-对于普通 EPUB：
+对于普通 EPUB 或 PDF：
 
 ```bash
 ./.venv/bin/python src/run_book_pipeline.py "/path/to/book.epub" --max-workers 16
@@ -189,7 +209,7 @@ output/<book>/<book>.translation_cache.json
 
 对于已知存在特殊目录链接的 EPUB：
 
-`src/run_book_pipeline.py` 已经内置 `src/fix_special_toc_links.py` 这一步，一般不需要手工再跑。
+`src/run_book_pipeline.py` 对 EPUB 会内置 `src/fix_special_toc_links.py` 这一步；PDF 输入不会额外跑这一步。
 
 ## Repository Notes
 

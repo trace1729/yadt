@@ -1,2 +1,3 @@
 openai>=1.30.0
 ebooklib>=0.20
+requests>=2.31.0

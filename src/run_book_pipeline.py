@@ -7,6 +7,7 @@ from typing import Sequence
 
 from ebooklib import epub
 
+from convert_pdf_to_markdown import convert_pdf_to_markdown, load_mineru_api_key
 from convert_epub_to_markdown import convert_epub_to_markdown, primary_metadata_value
 from convert_markdown_to_epub import write_epub
 from cleanup_bilingual_markdown import postprocess_markdown
@@ -60,6 +61,13 @@ def read_epub_metadata(input_path: Path) -> BookMetadata:
     return BookMetadata(title=title, author=author, bilingual_title=build_bilingual_title(title))
 
 
+def read_input_metadata(input_path: Path) -> BookMetadata:
+    if input_path.suffix.lower() == ".epub":
+        return read_epub_metadata(input_path)
+    title = input_path.stem
+    return BookMetadata(title=title, author=DEFAULT_AUTHOR, bilingual_title=build_bilingual_title(title))
+
+
 def run_pipeline(
     input_path: Path,
     *,
@@ -79,16 +87,22 @@ def run_pipeline(
         paths.bilingual_epub_path.parent,
     }:
         directory.mkdir(parents=True, exist_ok=True)
-    source_metadata = read_epub_metadata(input_path)
+    source_metadata = read_input_metadata(input_path)
     metadata = BookMetadata(
         title=title or source_metadata.title,
         author=author or source_metadata.author,
         bilingual_title=build_bilingual_title(title or source_metadata.title),
     )
 
-    convert_epub_to_markdown(input_path, paths.markdown_path)
-    fixed_markdown = fix_special_toc_headings(paths.markdown_path.read_text(encoding="utf-8"))
-    paths.markdown_path.write_text(fixed_markdown, encoding="utf-8")
+    if input_path.suffix.lower() == ".pdf":
+        mineru_api_key = load_mineru_api_key()
+        if not mineru_api_key:
+            raise SystemExit("Missing MINERU_API_KEY; set the env var or add it to .env")
+        convert_pdf_to_markdown(input_path, paths.markdown_path, api_key=mineru_api_key)
+    else:
+        convert_epub_to_markdown(input_path, paths.markdown_path)
+        fixed_markdown = fix_special_toc_headings(paths.markdown_path.read_text(encoding="utf-8"))
+        paths.markdown_path.write_text(fixed_markdown, encoding="utf-8")
 
     api_key = load_api_key()
     if not api_key:
