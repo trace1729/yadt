@@ -213,6 +213,53 @@ class StagedPipelineCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(events, ["convert", "translate", "cleanup", "epub"])
 
+    def test_epub2md_reads_config_and_forwards_backend_selection(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "book.epub"
+            input_path.write_bytes(b"epub")
+            paths = module.pipeline.derive_output_paths(input_path)
+
+            config = module.yaet_config.YaetConfig(
+                parsers=module.yaet_config.ParserConfig(epub="epub_translator", markdown="free_markdown_translator"),
+                provider=module.yaet_config.ProviderConfig(model="cfg-model"),
+                prompt=module.yaet_config.PromptConfig(),
+                style=module.yaet_config.StyleConfig(),
+                segmentation=module.yaet_config.SegmentationConfig(max_bundle_chars=4321),
+                translation=module.yaet_config.TranslationConfig(max_workers=7),
+                glossary={},
+            )
+
+            def fake_convert_source_to_markdown(input_value, output_path=None, epub_parser_backend="yaet"):
+                self.assertEqual(epub_parser_backend, "epub_translator")
+                output = output_path or paths.markdown_path
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text("# Book\n", encoding="utf-8")
+                return output
+
+            def fake_translate_markdown_file(input_value, output_path, cache_path, **kwargs):
+                self.assertEqual(kwargs["markdown_parser_backend"], "free_markdown_translator")
+                self.assertEqual(kwargs["model"], "cfg-model")
+                self.assertEqual(kwargs["max_chars_per_chunk"], 4321)
+                self.assertEqual(kwargs["max_workers"], 7)
+                output_path.write_text("# Book\n\n# 书\n", encoding="utf-8")
+                cache_path.write_text("{}", encoding="utf-8")
+                return output_path
+
+            with patch.object(module.yaet_config, "load_config", return_value=config), patch.object(
+                module.pipeline, "convert_source_to_markdown", side_effect=fake_convert_source_to_markdown
+            ), patch.object(
+                module.pipeline, "read_input_metadata",
+                return_value=module.pipeline.BookMetadata(title="Book", author="Author", bilingual_title="Book (Bilingual)")
+            ), patch.object(
+                module.pipeline, "translate_markdown_file", side_effect=fake_translate_markdown_file
+            ), patch.object(module.pipeline, "cleanup_markdown_file", return_value=paths.bilingual_markdown_path):
+                exit_code = module.main(["epub2md", str(input_path), "--translate", "--bilingual", "--config", "yaet.yaml"])
+
+        self.assertEqual(exit_code, 0)
+
     def test_translate_subcommand_delegates_to_translate_text_cli(self):
         module = load_module()
 

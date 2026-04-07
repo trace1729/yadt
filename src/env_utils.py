@@ -8,9 +8,11 @@ def project_root_from_file(file_path: str) -> Path:
 
 
 def resolve_dotenv_path(module_file: str, env_path: Path | None = None) -> Path | None:
-    candidates: list[Path] = []
     if env_path is not None:
-        candidates.append(env_path)
+        resolved = env_path.resolve()
+        return resolved if resolved.exists() else None
+
+    candidates: list[Path] = []
     candidates.append(Path(".env"))
     candidates.append(project_root_from_file(module_file) / ".env")
 

@@ -28,6 +28,7 @@ class EpubToMarkdownTests(unittest.TestCase):
             def fake_convert(input_value: Path, output_value: Path, asset_dir_name=None) -> None:
                 captured["input"] = input_value
                 captured["output"] = output_value
+                captured["backend"] = "yaet"
 
             with patch.object(epub_to_markdown_module, "convert_epub_to_markdown", side_effect=fake_convert):
                 result = epub_to_markdown_module.main([str(input_path)])
@@ -35,6 +36,23 @@ class EpubToMarkdownTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(captured["input"], input_path)
         self.assertEqual(captured["output"], tmp_path / "output" / "sample" / "sample.md")
+        self.assertEqual(captured["backend"], "yaet")
+
+    def test_main_forwards_backend_argument(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "sample.epub"
+            input_path.write_bytes(b"epub")
+            captured: dict[str, str] = {}
+
+            def fake_convert(input_value: Path, output_value: Path, asset_dir_name=None, backend="yaet") -> None:
+                captured["backend"] = backend
+
+            with patch.object(epub_to_markdown_module, "convert_epub_to_markdown", side_effect=fake_convert):
+                result = epub_to_markdown_module.main([str(input_path), "--backend", "epub_translator"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["backend"], "epub_translator")
 
     def test_convert_epub_to_markdown_creates_missing_output_directory(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -186,6 +204,21 @@ class EpubToMarkdownTests(unittest.TestCase):
             self.assertIn("- [Part II](#part-ii)", markdown)
             self.assertIn("  - [Section 1](#section-1)", markdown)
             self.assertIn("  - [Section 2](#section-2)", markdown)
+
+    def test_convert_epub_to_markdown_supports_epub_translator_backend(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "sample.epub"
+            output_path = tmp_path / "sample.md"
+            self._write_toc_driven_title_class_epub(input_path)
+
+            convert_epub_to_markdown(input_path, output_path, backend="epub_translator")
+
+            markdown = output_path.read_text(encoding="utf-8")
+            self.assertIn("## Part I", markdown)
+            self.assertIn("## Part II", markdown)
+            self.assertIn("### Section 1", markdown)
+            self.assertIn("### Section 2", markdown)
 
     def test_convert_epub_to_markdown_recovers_nested_span_sections_after_separator(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

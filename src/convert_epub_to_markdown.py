@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import posixpath
 import re
+import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -112,7 +113,16 @@ def normalize_heading_text(text: str) -> str:
     return collapse_whitespace(cleaned).strip()
 
 
-def build_toc_level_map(book: epub.EpubBook) -> dict[str, int]:
+def build_toc_level_map(
+    book: epub.EpubBook,
+    input_path: Path | None = None,
+    backend: str = "yaet",
+) -> dict[str, int]:
+    if backend == "epub_translator":
+        if input_path is None:
+            raise ValueError("input_path is required for the epub_translator backend")
+        return build_toc_level_map_from_epub_translator(input_path)
+
     levels: dict[str, int] = {}
 
     def register(item: object, depth: int) -> None:
@@ -158,13 +168,14 @@ def convert_epub_to_markdown(
     input_path: Path,
     output_path: Path,
     asset_dir_name: str | None = None,
+    backend: str = "yaet",
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     book = epub.read_epub(str(input_path))
     exporter = AssetExporter(book, output_path, asset_dir_name=asset_dir_name)
     slugger = Slugger()
-    toc_level_map = build_toc_level_map(book)
-    note_definitions = collect_note_definitions(book, exporter)
+    toc_level_map = build_toc_level_map(book, input_path=input_path, backend=backend)
+    note_definitions = collect_note_definitions(book, exporter, input_path=input_path, backend=backend)
     used_notes: dict[str, str] = {}
     toc_entries: list[TocEntry] = []
     rendered_documents: list[str] = []
@@ -172,7 +183,7 @@ def convert_epub_to_markdown(
     cover_image = detect_cover_image(book, exporter)
     book_title_slug = slugger.slugify(book_title)
 
-    for item in iter_document_items(book):
+    for item in iter_document_items(book, input_path=input_path, backend=backend):
         rendered = render_document(
             item,
             exporter,
@@ -223,7 +234,16 @@ def export_cover_item(item: object | None, exporter: AssetExporter) -> str | Non
     return f"![]({target})"
 
 
-def iter_document_items(book: epub.EpubBook) -> list[epub.EpubHtml]:
+def iter_document_items(
+    book: epub.EpubBook,
+    input_path: Path | None = None,
+    backend: str = "yaet",
+) -> list[epub.EpubHtml]:
+    if backend == "epub_translator":
+        if input_path is None:
+            raise ValueError("input_path is required for the epub_translator backend")
+        return iter_document_items_from_epub_translator(book, input_path)
+
     items: list[epub.EpubHtml] = []
     seen: set[str] = set()
 
@@ -644,9 +664,14 @@ def normalize_multiline_title(text: str) -> str:
     return collapse_whitespace(text)
 
 
-def collect_note_definitions(book: epub.EpubBook, exporter: AssetExporter) -> dict[str, str]:
+def collect_note_definitions(
+    book: epub.EpubBook,
+    exporter: AssetExporter,
+    input_path: Path | None = None,
+    backend: str = "yaet",
+) -> dict[str, str]:
     note_definitions: dict[str, str] = {}
-    for item in iter_document_items(book):
+    for item in iter_document_items(book, input_path=input_path, backend=backend):
         root = ET.fromstring(item.get_content())
         for anchor in root.findall(".//{*}a[@id]"):
             note_id = anchor.get("id")
@@ -706,10 +731,238 @@ def local_name(tag: str) -> str:
     return tag
 
 
+def iter_document_items_from_epub_translator(book: epub.EpubBook, input_path: Path) -> list[epub.EpubHtml]:
+    document_items = {
+        posixpath.normpath(item.get_name()): item
+        for item in book.get_items()
+        if item.get_type() == ITEM_DOCUMENT and not item.get_name().endswith("nav.xhtml")
+    }
+    items: list[epub.EpubHtml] = []
+    seen: set[str] = set()
+
+    for href in read_epub_translator_spine_paths(input_path):
+        item = document_items.get(href)
+        if item is None:
+            continue
+        seen.add(href)
+        items.append(item)
+
+    for href, item in document_items.items():
+        if href in seen:
+            continue
+        items.append(item)
+
+    return items
+
+
+def build_toc_level_map_from_epub_translator(input_path: Path) -> dict[str, int]:
+    with zipfile.ZipFile(input_path, "r") as archive:
+        opf_path = _find_opf_path(archive)
+        version = _detect_epub_version(archive, opf_path)
+        toc_path = _find_toc_path(archive, opf_path, version)
+        if toc_path is None:
+            return {}
+        root = ET.fromstring(archive.read(toc_path.as_posix()))
+        _strip_namespace(root)
+        toc_items = _read_nav_toc(root) if version == 3 else _read_ncx_toc(root)
+
+    levels: dict[str, int] = {}
+
+    def walk(items: Sequence[_TocItem], depth: int) -> None:
+        for item in items:
+            if item.full_href is not None:
+                resolved = posixpath.normpath(posixpath.join(toc_path.parent.as_posix(), item.full_href))
+                levels[resolved] = depth + 2
+            walk(item.children, depth + 1)
+
+    walk(toc_items, 0)
+    return levels
+
+
+def read_epub_translator_spine_paths(input_path: Path) -> list[str]:
+    with zipfile.ZipFile(input_path, "r") as archive:
+        opf_path = _find_opf_path(archive)
+        root = ET.fromstring(archive.read(opf_path.as_posix()))
+        _strip_namespace(root)
+
+        manifest = root.find(".//manifest")
+        if manifest is None:
+            return []
+
+        manifest_items: dict[str, tuple[str, str]] = {}
+        for item in manifest.findall("item"):
+            item_id = item.get("id")
+            item_href = item.get("href")
+            media_type = item.get("media-type", "")
+            if item_id and item_href:
+                manifest_items[item_id] = (item_href, media_type)
+
+        spine = root.find(".//spine")
+        if spine is None:
+            return []
+
+        paths: list[str] = []
+        for itemref in spine.findall("itemref"):
+            idref = itemref.get("idref")
+            if not idref or idref not in manifest_items:
+                continue
+            href, media_type = manifest_items[idref]
+            if media_type not in {"application/xhtml+xml", "text/html"}:
+                continue
+            paths.append(posixpath.normpath(posixpath.join(opf_path.parent.as_posix(), href)))
+        return paths
+
+
+@dataclass(frozen=True)
+class _TocItem:
+    title: str
+    href: str | None = None
+    fragment: str | None = None
+    children: tuple["_TocItem", ...] = ()
+
+    @property
+    def full_href(self) -> str | None:
+        if self.href is None:
+            return None
+        if self.fragment:
+            return f"{self.href}#{self.fragment}"
+        return self.href
+
+
+def _find_opf_path(archive: zipfile.ZipFile) -> PurePosixPath:
+    root = ET.fromstring(archive.read("META-INF/container.xml"))
+    namespace = {"ns": "urn:oasis:names:tc:opendocument:xmlns:container"}
+    rootfile = root.find(".//ns:rootfile", namespace)
+    if rootfile is None:
+        rootfile = root.find(".//rootfile")
+    if rootfile is None or rootfile.get("full-path") is None:
+        raise ValueError("Cannot find OPF path in EPUB container.xml")
+    return PurePosixPath(rootfile.get("full-path"))
+
+
+def _strip_namespace(element: ET.Element) -> None:
+    if element.tag.startswith("{"):
+        element.tag = element.tag.split("}", 1)[1]
+    for child in element:
+        _strip_namespace(child)
+
+
+def _detect_epub_version(archive: zipfile.ZipFile, opf_path: PurePosixPath) -> int:
+    root = ET.fromstring(archive.read(opf_path.as_posix()))
+    version = root.get("version", "2.0")
+    return 3 if version.startswith("3") else 2
+
+
+def _find_toc_path(archive: zipfile.ZipFile, opf_path: PurePosixPath, version: int) -> PurePosixPath | None:
+    root = ET.fromstring(archive.read(opf_path.as_posix()))
+    _strip_namespace(root)
+    manifest = root.find(".//manifest")
+    if manifest is None:
+        return None
+
+    if version == 2:
+        for item in manifest.findall("item"):
+            if item.get("media-type") == "application/x-dtbncx+xml" and item.get("href"):
+                return opf_path.parent / item.get("href")
+        return None
+
+    for item in manifest.findall("item"):
+        properties = item.get("properties", "")
+        if "nav" in properties.split() and item.get("href"):
+            return opf_path.parent / item.get("href")
+    return None
+
+
+def _read_ncx_toc(root: ET.Element) -> list[_TocItem]:
+    nav_map = root.find(".//navMap")
+    if nav_map is None:
+        return []
+    items: list[_TocItem] = []
+    for nav_point in nav_map.findall("navPoint"):
+        parsed = _parse_nav_point(nav_point)
+        if parsed is not None:
+            items.append(parsed)
+    return items
+
+
+def _parse_nav_point(nav_point: ET.Element) -> _TocItem | None:
+    text_elem = nav_point.find("navLabel/text")
+    if text_elem is None:
+        return None
+    title = collapse_whitespace("".join(text_elem.itertext())).strip()
+    if not title:
+        return None
+    href = None
+    fragment = None
+    content = nav_point.find("content")
+    if content is not None and content.get("src"):
+        href, fragment = _split_href(content.get("src"))
+    children = tuple(
+        child
+        for child in (_parse_nav_point(child_nav) for child_nav in nav_point.findall("navPoint"))
+        if child is not None
+    )
+    return _TocItem(title=title, href=href, fragment=fragment, children=children)
+
+
+def _read_nav_toc(root: ET.Element) -> list[_TocItem]:
+    nav_elem = None
+    for nav in root.findall(".//nav"):
+        if any(value == "toc" for key, value in nav.attrib.items() if key.endswith("type")):
+            nav_elem = nav
+            break
+    if nav_elem is None:
+        return []
+
+    ol = nav_elem.find(".//ol")
+    if ol is None:
+        return []
+
+    items: list[_TocItem] = []
+    for li in ol.findall("li"):
+        parsed = _parse_nav_li(li)
+        if parsed is not None:
+            items.append(parsed)
+    return items
+
+
+def _parse_nav_li(li: ET.Element) -> _TocItem | None:
+    anchor = li.find("a")
+    href = None
+    fragment = None
+    if anchor is not None:
+        title = collapse_whitespace("".join(anchor.itertext())).strip()
+        if anchor.get("href"):
+            href, fragment = _split_href(anchor.get("href"))
+    else:
+        span = li.find("span")
+        if span is None:
+            return None
+        title = collapse_whitespace("".join(span.itertext())).strip()
+
+    if not title:
+        return None
+
+    children = tuple(
+        child
+        for child in (_parse_nav_li(child_li) for child_li in li.findall("ol/li"))
+        if child is not None
+    )
+    return _TocItem(title=title, href=href, fragment=fragment, children=children)
+
+
+def _split_href(href: str) -> tuple[str | None, str | None]:
+    if "#" not in href:
+        return href, None
+    document, fragment = href.split("#", 1)
+    return document or None, fragment or None
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert an EPUB file to Markdown.")
     parser.add_argument("input_path", help="Path to the source EPUB file.")
     parser.add_argument("-o", "--output", dest="output_path", help="Path to the output Markdown file.")
+    parser.add_argument("--backend", choices=("yaet", "epub_translator"), default="yaet")
     parser.add_argument(
         "--asset-dir-name",
         default=None,
@@ -726,7 +979,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.output_path
         else book_output_dir(input_path) / f"{sanitize_book_dir_name(canonical_book_name(input_path))}.md"
     )
-    convert_epub_to_markdown(input_path, output_path, asset_dir_name=args.asset_dir_name)
+    if args.backend == "yaet":
+        convert_epub_to_markdown(input_path, output_path, asset_dir_name=args.asset_dir_name)
+    else:
+        convert_epub_to_markdown(input_path, output_path, asset_dir_name=args.asset_dir_name, backend=args.backend)
     return 0
 
 

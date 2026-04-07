@@ -70,7 +70,11 @@ def read_input_metadata(input_path: Path) -> BookMetadata:
     return BookMetadata(title=title, author=DEFAULT_AUTHOR, bilingual_title=build_bilingual_title(title))
 
 
-def convert_source_to_markdown(input_path: Path, output_path: Path | None = None) -> Path:
+def convert_source_to_markdown(
+    input_path: Path,
+    output_path: Path | None = None,
+    epub_parser_backend: str = "yaet",
+) -> Path:
     target_path = output_path or derive_output_paths(input_path).markdown_path
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -81,7 +85,10 @@ def convert_source_to_markdown(input_path: Path, output_path: Path | None = None
         convert_pdf_to_markdown(input_path, target_path, api_key=mineru_api_key)
         return target_path
 
-    convert_epub_to_markdown(input_path, target_path)
+    if epub_parser_backend == "yaet":
+        convert_epub_to_markdown(input_path, target_path)
+    else:
+        convert_epub_to_markdown(input_path, target_path, backend=epub_parser_backend)
     fixed_markdown = fix_special_toc_headings(target_path.read_text(encoding="utf-8"))
     target_path.write_text(fixed_markdown, encoding="utf-8")
     return target_path
@@ -97,12 +104,23 @@ def translate_markdown_file(
     max_workers: int = 3,
     resume: bool = True,
     output_mode: str = "bilingual",
+    markdown_parser_backend: str = "yaet",
+    provider_base_url: str = "https://api.deepseek.com",
+    provider_api_key: str | None = None,
+    provider_api_key_env: str = "DEEPSEEK_API_KEY",
+    prompt_config=None,
+    style_config=None,
+    glossary: dict[str, str] | None = None,
+    cache_namespace: str = "",
 ) -> Path:
-    api_key = load_api_key()
+    api_key = provider_api_key or load_api_key(env_var=provider_api_key_env)
     if not api_key:
-        raise SystemExit("Missing DEEPSEEK_API_KEY; set the env var or add it to .env")
+        raise SystemExit(f"Missing {provider_api_key_env}; set the env var or add it to .env")
 
-    client = create_client(api_key)
+    if provider_base_url == "https://api.deepseek.com":
+        client = create_client(api_key)
+    else:
+        client = create_client(api_key, base_url=provider_base_url)
     run_translation_pipeline(
         input_path=input_path,
         output_path=output_path,
@@ -113,6 +131,11 @@ def translate_markdown_file(
         resume=resume,
         max_workers=max_workers,
         output_mode=output_mode,
+        parser_backend=markdown_parser_backend,
+        prompt_config=prompt_config,
+        style_config=style_config,
+        glossary=glossary,
+        cache_namespace=cache_namespace,
     )
     return output_path
 
@@ -144,6 +167,15 @@ def run_pipeline(
     max_chars_per_chunk: int = DEFAULT_MAX_CHARS_PER_CHUNK,
     max_workers: int = 3,
     resume: bool = True,
+    epub_parser_backend: str = "yaet",
+    markdown_parser_backend: str = "yaet",
+    provider_base_url: str = "https://api.deepseek.com",
+    provider_api_key: str | None = None,
+    provider_api_key_env: str = "DEEPSEEK_API_KEY",
+    prompt_config=None,
+    style_config=None,
+    glossary: dict[str, str] | None = None,
+    cache_namespace: str = "",
 ) -> PipelineResult:
     paths = derive_output_paths(input_path, output_prefix=output_prefix)
     for directory in {
@@ -160,7 +192,7 @@ def run_pipeline(
         bilingual_title=build_bilingual_title(title or source_metadata.title),
     )
 
-    convert_source_to_markdown(input_path, paths.markdown_path)
+    convert_source_to_markdown(input_path, paths.markdown_path, epub_parser_backend=epub_parser_backend)
     translate_markdown_file(
         paths.markdown_path,
         paths.bilingual_markdown_path,
@@ -170,6 +202,14 @@ def run_pipeline(
         max_workers=max_workers,
         resume=resume,
         output_mode="bilingual",
+        markdown_parser_backend=markdown_parser_backend,
+        provider_base_url=provider_base_url,
+        provider_api_key=provider_api_key,
+        provider_api_key_env=provider_api_key_env,
+        prompt_config=prompt_config,
+        style_config=style_config,
+        glossary=glossary,
+        cache_namespace=cache_namespace,
     )
     cleanup_markdown_file(paths.bilingual_markdown_path)
     export_markdown_to_epub(

@@ -6,6 +6,8 @@
 
 - `src/yaet_cli.py`: 统一 CLI 入口，支持 `pdf2md`、`epub2md`、`md2md`、`pdf2epub`、`epub2epub`、`translate`
 - `src/run_book_pipeline.py`: 一键执行 `epub -> markdown -> heading fix -> translate -> cleanup -> epub`
+- `src/yaet_config.py`: YAET 的 YAML 配置加载与运行时覆盖逻辑
+- `src/simple_yaml.py`: 无 PyYAML 依赖时的最小 YAML 解析后备实现
 
 
 ## Install
@@ -72,8 +74,10 @@ export PATH="$HOME/.local/bin:$PATH"
 ./yaet pdf2md "/path/to/paper.pdf" --translate --bilingual --max-workers 16
 ./yaet epub2md "/path/to/book.epub"
 ./yaet epub2md "/path/to/book.epub" --translate --bilingual --max-workers 16
+./yaet epub2md "/path/to/book.epub" --epub-parser-backend epub_translator
 ./yaet md2md "/path/to/book.md"
 ./yaet md2md "/path/to/book.md" --translate --bilingual --max-workers 16
+./yaet md2md "/path/to/book.md" --translate --markdown-parser-backend free_markdown_translator
 ./yaet pdf2epub "/path/to/paper.pdf"
 ./yaet pdf2epub "/path/to/paper.pdf" --translate --bilingual --max-workers 16
 ./yaet epub2epub "/path/to/book.epub" --max-workers 16
@@ -108,12 +112,78 @@ output/The_Paper_Menagerie_and_Oth_(Z-Library)/
 - `<book>.bilingual.epub`
 - `<book>_assets/`
 
+## Config File
+
+`yaet` 现在支持 YAML 配置文件。查找顺序：
+
+- `--config <path>`
+- 仓库根目录 `yaet.yaml`
+- 仓库根目录 `yaet.yml`
+- 仓库根目录 `config.yaml`
+- `~/.yaet/config.yaml`
+
+当前主要配置项：
+
+```yaml
+parsers:
+  epub: yaet
+  markdown: yaet
+
+provider:
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+  model: deepseek-chat
+
+segmentation:
+  max_bundle_chars: 6000
+
+translation:
+  max_workers: 16
+  resume: true
+
+style:
+  tone: academic
+  audience: general readers
+  preserve_terms:
+    - Markdown
+  instructions:
+    - Keep citations stable.
+
+prompt:
+  title: ""
+  summary: ""
+  terms: ""
+
+glossary:
+  agent: 智能体
+```
+
+CLI 参数仍然优先于配置文件。
+
+## Parser Backends
+
+当前可选后端：
+
+- EPUB: `yaet`、`epub_translator`
+- Markdown: `yaet`、`free_markdown_translator`
+
+默认值都是 `yaet`。
+
+示例：
+
+```bash
+./yaet epub2md "/path/to/book.epub" --epub-parser-backend epub_translator
+./yaet md2md "/path/to/book.md" --translate --markdown-parser-backend free_markdown_translator
+./yaet epub2epub "/path/to/book.epub" --config yaet.yaml
+```
+
 ## Step By Step
 
 ### 1. EPUB -> Markdown
 
 ```bash
 ./.venv/bin/python src/convert_epub_to_markdown.py "/path/to/book.epub"
+./.venv/bin/python src/convert_epub_to_markdown.py "/path/to/book.epub" --backend epub_translator
 ```
 
 默认行为：
@@ -123,6 +193,7 @@ output/The_Paper_Menagerie_and_Oth_(Z-Library)/
 - 保留章节层级
 - 导出图片到同目录下的 `<book>_assets/`
 - 自动检测封面图片，包括 `titlepage.xhtml` 中 SVG 引用的 `cover.jpeg`
+- `--backend epub_translator` 时使用从 `epub-translator` 适配过来的 spine/TOC 解析逻辑
 
 ### 1b. PDF -> Markdown
 
@@ -276,6 +347,8 @@ cat notes.txt | ./.venv/bin/python src/translate_text_cli.py --bilingual
 ## Repository Notes
 
 - 术语表内置在 `src/translate_markdown_book.py` 的 `GLOSSARY` 中
+- 运行时配置入口在 `src/yaet_config.py`
 - 图片缓存默认放在输出目录下的 `.epub_image_cache/`
 - 翻译缓存是 JSON，可复用来续跑大书
+- 翻译缓存 key 现在会带上后端/配置命名空间，避免不同解析配置互相污染
 - API 调用会产生费用，建议先试跑小样本

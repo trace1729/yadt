@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Sequence
 
 from translate_markdown_book import block_cache_key, parse_blocks
+import yaet_config
 
 
 @dataclass(frozen=True)
@@ -18,16 +19,22 @@ class Progress:
     percent: float
 
 
-def compute_progress(source_path: Path, cache_path: Path, model: str) -> Progress:
+def compute_progress(
+    source_path: Path,
+    cache_path: Path,
+    model: str,
+    parser_backend: str = "yaet",
+    cache_namespace: str = "",
+) -> Progress:
     source = source_path.read_text(encoding="utf-8")
-    blocks = [block for block in parse_blocks(source) if block.translatable]
+    blocks = [block for block in parse_blocks(source, parser_backend=parser_backend) if block.translatable]
 
     if cache_path.exists():
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
     else:
         cache = {}
 
-    completed_blocks = sum(1 for block in blocks if block_cache_key(block, model) in cache)
+    completed_blocks = sum(1 for block in blocks if block_cache_key(block, model, namespace=cache_namespace) in cache)
     total_blocks = len(blocks)
     remaining_blocks = max(total_blocks - completed_blocks, 0)
     percent = (completed_blocks / total_blocks * 100.0) if total_blocks else 100.0
@@ -77,6 +84,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Show translation progress based on the cache file.")
     parser.add_argument("source_path", nargs="?", default="The_society_of_mind.md")
     parser.add_argument("--cache-path", default=".translation_cache.json")
+    parser.add_argument("--config")
+    parser.add_argument("--markdown-parser-backend", choices=("yaet", "free_markdown_translator"))
     parser.add_argument("--model", default="deepseek-chat")
     parser.add_argument("--interval", type=float, default=2.0)
     parser.add_argument("--width", type=int, default=24)
@@ -89,9 +98,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     source_path = Path(args.source_path)
     cache_path = Path(args.cache_path)
     samples: list[tuple[float, int]] = []
+    runtime_config = yaet_config.apply_cli_overrides(
+        yaet_config.load_config(args.config),
+        markdown_parser_backend=args.markdown_parser_backend,
+        model=args.model,
+    )
+    cache_namespace = yaet_config.build_cache_namespace(runtime_config)
 
     while True:
-        progress = compute_progress(source_path, cache_path, model=args.model)
+        progress = compute_progress(
+            source_path,
+            cache_path,
+            model=runtime_config.provider.model,
+            parser_backend=runtime_config.parsers.markdown,
+            cache_namespace=cache_namespace,
+        )
         samples.append((time.time(), progress.completed_blocks))
         samples = samples[-10:]
         eta_seconds = estimate_eta_seconds(samples, progress.remaining_blocks)

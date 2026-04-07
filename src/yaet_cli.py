@@ -7,6 +7,7 @@ from typing import Sequence
 
 import run_book_pipeline as pipeline
 import translate_text_cli as text_cli
+import yaet_config
 
 
 def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
@@ -22,6 +23,9 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, l
         subparser = subparsers.add_parser(name, description=description)
         subparser.add_argument("input_path")
         subparser.add_argument("-o", "--output", dest="output_path")
+        subparser.add_argument("--config")
+        subparser.add_argument("--epub-parser-backend", choices=("yaet", "epub_translator"))
+        subparser.add_argument("--markdown-parser-backend", choices=("yaet", "free_markdown_translator"))
         subparser.add_argument("--translate", action="store_true")
         subparser.add_argument("--bilingual", action="store_true")
         _add_shared_translate_args(subparser)
@@ -29,6 +33,9 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, l
     epub_subparser = subparsers.add_parser("pdf2epub", description="Convert a PDF to EPUB, optionally through bilingual translation.")
     epub_subparser.add_argument("input_path")
     epub_subparser.add_argument("-o", "--output", dest="output_path")
+    epub_subparser.add_argument("--config")
+    epub_subparser.add_argument("--epub-parser-backend", choices=("yaet", "epub_translator"))
+    epub_subparser.add_argument("--markdown-parser-backend", choices=("yaet", "free_markdown_translator"))
     epub_subparser.add_argument("--translate", action="store_true")
     epub_subparser.add_argument("--bilingual", action="store_true")
     epub_subparser.add_argument("--title")
@@ -41,6 +48,9 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, l
     )
     translate_epub.add_argument("input_path")
     translate_epub.add_argument("-o", "--output", dest="output_path")
+    translate_epub.add_argument("--config")
+    translate_epub.add_argument("--epub-parser-backend", choices=("yaet", "epub_translator"))
+    translate_epub.add_argument("--markdown-parser-backend", choices=("yaet", "free_markdown_translator"))
     translate_epub.add_argument("--title")
     translate_epub.add_argument("--author")
     _add_shared_translate_args(translate_epub)
@@ -51,11 +61,11 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, l
 
 
 def _add_shared_translate_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--model", default=pipeline.DEFAULT_MODEL)
-    parser.add_argument("--max-chars-per-chunk", type=int, default=pipeline.DEFAULT_MAX_CHARS_PER_CHUNK)
-    parser.add_argument("--max-workers", type=int, default=3)
+    parser.add_argument("--model")
+    parser.add_argument("--max-chars-per-chunk", type=int)
+    parser.add_argument("--max-workers", type=int)
     parser.add_argument("--no-resume", dest="resume", action="store_false")
-    parser.set_defaults(resume=True)
+    parser.set_defaults(resume=None)
 
 
 def _resolve_output_mode(args: argparse.Namespace) -> str:
@@ -65,19 +75,41 @@ def _resolve_output_mode(args: argparse.Namespace) -> str:
 
 
 def _translate_and_maybe_cleanup(markdown_path: Path, paths: pipeline.PipelinePaths, args: argparse.Namespace) -> Path:
+    runtime_config = _runtime_config_from_args(args)
     translated_path = pipeline.translate_markdown_file(
         markdown_path,
         paths.bilingual_markdown_path,
         paths.cache_path,
-        model=args.model,
-        max_chars_per_chunk=args.max_chars_per_chunk,
-        max_workers=args.max_workers,
-        resume=args.resume,
+        model=runtime_config.provider.model,
+        max_chars_per_chunk=runtime_config.segmentation.max_bundle_chars,
+        max_workers=runtime_config.translation.max_workers,
+        resume=runtime_config.translation.resume,
         output_mode=_resolve_output_mode(args),
+        markdown_parser_backend=runtime_config.parsers.markdown,
+        provider_base_url=runtime_config.provider.base_url,
+        provider_api_key=runtime_config.provider.api_key,
+        provider_api_key_env=runtime_config.provider.api_key_env,
+        prompt_config=runtime_config.prompt,
+        style_config=runtime_config.style,
+        glossary=runtime_config.glossary,
+        cache_namespace=yaet_config.build_cache_namespace(runtime_config),
     )
     if _resolve_output_mode(args) == "bilingual":
         pipeline.cleanup_markdown_file(translated_path)
     return translated_path
+
+
+def _runtime_config_from_args(args: argparse.Namespace) -> yaet_config.YaetConfig:
+    config = yaet_config.load_config(getattr(args, "config", None))
+    return yaet_config.apply_cli_overrides(
+        config,
+        model=getattr(args, "model", None),
+        max_chars_per_chunk=getattr(args, "max_chars_per_chunk", None),
+        max_workers=getattr(args, "max_workers", None),
+        epub_parser_backend=getattr(args, "epub_parser_backend", None),
+        markdown_parser_backend=getattr(args, "markdown_parser_backend", None),
+        resume=getattr(args, "resume", None),
+    )
 
 
 def _prepare_markdown_input(input_path: Path, output_path: Path | None, paths: pipeline.PipelinePaths) -> Path:
@@ -86,6 +118,20 @@ def _prepare_markdown_input(input_path: Path, output_path: Path | None, paths: p
     if input_path.resolve() != markdown_output.resolve():
         shutil.copyfile(input_path, markdown_output)
     return markdown_output
+
+
+def _convert_source_with_backend(
+    input_path: Path,
+    output_path: Path,
+    runtime_config: yaet_config.YaetConfig,
+) -> Path:
+    if runtime_config.parsers.epub == "yaet":
+        return pipeline.convert_source_to_markdown(input_path, output_path)
+    return pipeline.convert_source_to_markdown(
+        input_path,
+        output_path,
+        epub_parser_backend=runtime_config.parsers.epub,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -97,10 +143,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     input_path = Path(args.input_path)
     paths = pipeline.derive_output_paths(input_path)
     metadata = pipeline.read_input_metadata(input_path)
+    runtime_config = _runtime_config_from_args(args)
 
     if args.command in {"pdf2md", "epub2md"}:
         markdown_output = Path(args.output_path) if args.output_path else paths.markdown_path
-        markdown_path = pipeline.convert_source_to_markdown(input_path, markdown_output)
+        markdown_path = _convert_source_with_backend(input_path, markdown_output, runtime_config)
         if not args.translate:
             return 0
         _translate_and_maybe_cleanup(markdown_path, paths, args)
@@ -114,7 +161,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "pdf2epub":
-        markdown_path = pipeline.convert_source_to_markdown(input_path, paths.markdown_path)
+        markdown_path = _convert_source_with_backend(input_path, paths.markdown_path, runtime_config)
         export_source = markdown_path
         export_title = args.title or metadata.title
         export_author = args.author or metadata.author
@@ -132,16 +179,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "epub2epub":
-        markdown_path = pipeline.convert_source_to_markdown(input_path, paths.markdown_path)
+        markdown_path = _convert_source_with_backend(input_path, paths.markdown_path, runtime_config)
         bilingual_path = pipeline.translate_markdown_file(
             markdown_path,
             paths.bilingual_markdown_path,
             paths.cache_path,
-            model=args.model,
-            max_chars_per_chunk=args.max_chars_per_chunk,
-            max_workers=args.max_workers,
-            resume=args.resume,
+            model=runtime_config.provider.model,
+            max_chars_per_chunk=runtime_config.segmentation.max_bundle_chars,
+            max_workers=runtime_config.translation.max_workers,
+            resume=runtime_config.translation.resume,
             output_mode="bilingual",
+            markdown_parser_backend=runtime_config.parsers.markdown,
+            provider_base_url=runtime_config.provider.base_url,
+            provider_api_key=runtime_config.provider.api_key,
+            provider_api_key_env=runtime_config.provider.api_key_env,
+            prompt_config=runtime_config.prompt,
+            style_config=runtime_config.style,
+            glossary=runtime_config.glossary,
+            cache_namespace=yaet_config.build_cache_namespace(runtime_config),
         )
         pipeline.cleanup_markdown_file(bilingual_path)
         output_epub_path = Path(args.output_path) if args.output_path else paths.bilingual_epub_path

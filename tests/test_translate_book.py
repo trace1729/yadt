@@ -63,6 +63,28 @@ class ParseAndReconstructTests(unittest.TestCase):
         self.assertTrue(blocks[4].translatable)
         self.assertFalse(blocks[6].translatable)
 
+    def test_parse_blocks_free_markdown_translator_protects_markdown_and_preserves_front_matter(self):
+        source = (
+            "---\n"
+            "title: Sample Doc\n"
+            "description: Intro\n"
+            "---\n"
+            "\n"
+            "# Title\n"
+            "\n"
+            "Paragraph with `code` and [a link](https://example.com).\n"
+        )
+
+        blocks = parse_blocks(source, parser_backend="free_markdown_translator")
+
+        self.assertEqual(blocks[0].kind, "front_matter")
+        self.assertFalse(blocks[0].translatable)
+        self.assertTrue(blocks[2].translatable)
+        self.assertEqual(blocks[2].text, "# Title")
+        self.assertIn("{{MD_0}}", blocks[2].prompt_text or "")
+        self.assertIn("{{CODE_0}}", blocks[4].prompt_text or "")
+        self.assertIn("{{URL_", blocks[4].prompt_text or "")
+
     def test_reconstruct_markdown_inserts_translation_after_original_in_bilingual_mode(self):
         blocks = [
             Block(kind="heading", text="# Title", translatable=True),
@@ -113,6 +135,14 @@ class BatchAndCacheTests(unittest.TestCase):
             loaded = TranslationCache(cache_path)
             self.assertEqual(loaded.get("k1"), "译文")
             self.assertEqual(json.loads(cache_path.read_text(encoding="utf-8")), {"k1": "译文"})
+
+    def test_block_cache_key_changes_when_namespace_changes(self):
+        block = Block(kind="paragraph", text="alpha", translatable=True)
+
+        default_key = block_cache_key(block, "deepseek-chat")
+        custom_key = block_cache_key(block, "deepseek-chat", namespace="fmt")
+
+        self.assertNotEqual(default_key, custom_key)
 
 
 class ApiFlowTests(unittest.TestCase):
@@ -319,6 +349,31 @@ class ProgressMonitorTests(unittest.TestCase):
             self.assertEqual(progress.total_blocks, 2)
             self.assertEqual(progress.completed_blocks, 1)
             self.assertEqual(progress.remaining_blocks, 1)
+
+    def test_compute_progress_honors_cache_namespace_and_parser_backend(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            source_path = Path(tmp_dir) / "input.md"
+            cache_path = Path(tmp_dir) / "cache.json"
+            source_path.write_text("# Title\n\nHello `code`.\n", encoding="utf-8")
+
+            blocks = parse_blocks(source_path.read_text(encoding="utf-8"), parser_backend="free_markdown_translator")
+            cache = {
+                block_cache_key(blocks[0], "deepseek-chat", namespace="fmt"): "# 标题",
+                block_cache_key(blocks[2], "deepseek-chat", namespace="fmt"): "你好 `code`。",
+            }
+            cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+
+            progress = compute_progress(
+                source_path,
+                cache_path,
+                model="deepseek-chat",
+                parser_backend="free_markdown_translator",
+                cache_namespace="fmt",
+            )
+
+            self.assertEqual(progress.total_blocks, 2)
+            self.assertEqual(progress.completed_blocks, 2)
+            self.assertEqual(progress.remaining_blocks, 0)
 
     def test_render_progress_line_formats_percent_and_bar(self):
         line = render_progress_line(completed=25, total=100, width=10, eta_seconds=3661)
