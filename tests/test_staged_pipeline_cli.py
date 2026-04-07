@@ -10,16 +10,17 @@ from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
-SCRIPT_PATH = SRC_DIR / "staged_pipeline_cli.py"
+SCRIPT_PATH = SRC_DIR / "yaet_cli.py"
+WRAPPER_PATH = PROJECT_ROOT / "yaet"
 
 
 def load_module():
     if not SCRIPT_PATH.exists():
-        raise AssertionError("staged_pipeline_cli.py is missing")
+        raise AssertionError("yaet_cli.py is missing")
 
-    spec = importlib.util.spec_from_file_location("staged_pipeline_cli", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location("yaet_cli", SCRIPT_PATH)
     if spec is None or spec.loader is None:
-        raise AssertionError("unable to load staged_pipeline_cli.py")
+        raise AssertionError("unable to load yaet_cli.py")
 
     module = importlib.util.module_from_spec(spec)
     if str(SRC_DIR) not in sys.path:
@@ -30,6 +31,9 @@ def load_module():
 
 
 class StagedPipelineCliTests(unittest.TestCase):
+    def test_wrapper_script_exists(self):
+        self.assertTrue(WRAPPER_PATH.exists())
+
     def test_pdf2markdown_without_translation_only_converts_pdf(self):
         module = load_module()
         events: list[str] = []
@@ -91,7 +95,7 @@ class StagedPipelineCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(events, ["convert", "translate", "cleanup"])
 
-    def test_translate_epub_produces_bilingual_epub(self):
+    def test_epub2epub_produces_bilingual_epub(self):
         module = load_module()
         events: list[str] = []
 
@@ -136,10 +140,28 @@ class StagedPipelineCliTests(unittest.TestCase):
             ), patch.object(module.pipeline, "cleanup_markdown_file", side_effect=fake_cleanup_markdown_file), patch.object(
                 module.pipeline, "export_markdown_to_epub", side_effect=fake_export_markdown_to_epub
             ):
-                exit_code = module.main(["translate_epub", str(input_path)])
+                exit_code = module.main(["epub2epub", str(input_path)])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(events, ["convert", "translate", "cleanup", "epub"])
+
+    def test_translate_subcommand_delegates_to_translate_text_cli(self):
+        module = load_module()
+
+        with patch.object(module.text_cli, "main", return_value=0) as text_main:
+            exit_code = module.main(["translate", "Hello world"])
+
+        self.assertEqual(exit_code, 0)
+        text_main.assert_called_once_with(["Hello world"])
+
+    def test_translate_subcommand_forwards_bilingual_flags(self):
+        module = load_module()
+
+        with patch.object(module.text_cli, "main", return_value=0) as text_main:
+            exit_code = module.main(["translate", "--bilingual", "--input", "notes.txt", "--output", "notes.bilingual.txt"])
+
+        self.assertEqual(exit_code, 0)
+        text_main.assert_called_once_with(["--bilingual", "--input", "notes.txt", "--output", "notes.bilingual.txt"])
 
 
 if __name__ == "__main__":

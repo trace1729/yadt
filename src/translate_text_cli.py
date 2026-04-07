@@ -40,9 +40,9 @@ def build_translation_prompt(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Translate one English string to Simplified Chinese.")
     parser.add_argument("text", nargs="?", help="English text to translate")
-    parser.add_argument("--raw", action="store_true", help="Translate raw text from a txt file, stdin, or direct input")
-    parser.add_argument("--input", dest="input_path", help="Path to a txt file for raw mode")
-    parser.add_argument("-o", "--output", dest="output_path", help="Optional output path for raw mode")
+    parser.add_argument("--bilingual", action="store_true", help="Output bilingual text from a txt file, stdin, or direct input")
+    parser.add_argument("--input", dest="input_path", help="Path to a txt file for bilingual mode")
+    parser.add_argument("-o", "--output", dest="output_path", help="Optional output path for bilingual mode")
     parser.add_argument("-v", "--verbose", action="store_true", help="Include pronunciation and an example sentence")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="DeepSeek model name")
     return parser.parse_args(argv)
@@ -116,7 +116,7 @@ def format_verbose_output(payload: dict[str, str]) -> str:
     )
 
 
-def resolve_raw_text(args: argparse.Namespace) -> str:
+def resolve_input_text(args: argparse.Namespace) -> str:
     if args.input_path:
         return Path(args.input_path).read_text(encoding="utf-8")
     if args.text:
@@ -133,10 +133,10 @@ def main(argv: Sequence[str] | None = None, env_path: Path | None = None) -> int
 
     try:
         client = create_client(api_key)
-        if args.raw:
-            raw_text = resolve_raw_text(args)
+        if args.bilingual:
+            raw_text = resolve_input_text(args)
             if not raw_text.strip():
-                print("Raw mode requires input text, --input, or stdin.", file=sys.stderr)
+                print("Bilingual mode requires input text, --input, or stdin.", file=sys.stderr)
                 return 1
             bilingual_text = translate_text_bilingual(client, raw_text, model=args.model)
             if args.output_path:

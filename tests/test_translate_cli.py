@@ -104,7 +104,7 @@ class TranslateCliTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("DEEPSEEK_API_KEY", stderr.getvalue())
 
-    def test_raw_mode_reads_txt_file_and_writes_bilingual_output_file(self):
+    def test_bilingual_mode_reads_txt_file_and_writes_bilingual_output_file(self):
         module = load_translate_cli_module(self)
         client = Mock()
         client.chat.completions.create.return_value = Mock(
@@ -121,7 +121,7 @@ class TranslateCliTests(unittest.TestCase):
 
             with patch.object(module, "create_client", return_value=client):
                 exit_code = module.main(
-                    ["--raw", "--input", str(input_path), "--output", str(output_path)],
+                    ["--bilingual", "--input", str(input_path), "--output", str(output_path)],
                     env_path=env_path,
                 )
 
@@ -129,7 +129,7 @@ class TranslateCliTests(unittest.TestCase):
             self.assertTrue(output_path.exists())
             self.assertEqual(output_path.read_text(encoding="utf-8"), "Line one.\n\n第一行。\n")
 
-    def test_raw_mode_reads_from_stdin_and_prints_bilingual_output(self):
+    def test_bilingual_mode_reads_from_stdin_and_prints_bilingual_output(self):
         module = load_translate_cli_module(self)
         client = Mock()
         client.chat.completions.create.return_value = Mock(
@@ -145,7 +145,7 @@ class TranslateCliTests(unittest.TestCase):
                 sys, "stdin", io.StringIO("Hello")
             ):
                 with contextlib.redirect_stdout(stdout):
-                    exit_code = module.main(["--raw"], env_path=env_path)
+                    exit_code = module.main(["--bilingual"], env_path=env_path)
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(stdout.getvalue(), "Hello\n\n你好\n")
