@@ -8,7 +8,8 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "fix_special_toc_links.py"
+SRC_DIR = PROJECT_ROOT / "src"
+SCRIPT_PATH = SRC_DIR / "fix_special_toc_links.py"
 
 
 def load_module():
@@ -20,6 +21,7 @@ def load_module():
         raise AssertionError("unable to load fix_special_toc_links.py")
 
     module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(SRC_DIR))
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module

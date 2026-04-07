@@ -7,6 +7,12 @@ import zipfile
 from pathlib import Path
 from concurrent.futures import Future
 from unittest.mock import Mock, patch
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 import convert_markdown_to_epub as markdown_to_epub_module
 import translate_markdown_book as translate_book_module

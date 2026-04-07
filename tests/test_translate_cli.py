@@ -6,10 +6,16 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 
 def load_translate_cli_module(test_case: unittest.TestCase):
-    module_path = Path(__file__).resolve().parent.parent / "translate_text_cli.py"
+    module_path = SRC_DIR / "translate_text_cli.py"
     if not module_path.exists():
         test_case.fail("translate_text_cli.py is missing")
 

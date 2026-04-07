@@ -4,8 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import sys
 
 from ebooklib import epub
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SRC_DIR = PROJECT_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 import convert_epub_to_markdown as epub_to_markdown_module
 from convert_epub_to_markdown import convert_epub_to_markdown

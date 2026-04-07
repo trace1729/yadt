@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT_PATH = PROJECT_ROOT / "run_book_pipeline.py"
+SRC_DIR = PROJECT_ROOT / "src"
+SCRIPT_PATH = SRC_DIR / "run_book_pipeline.py"
 
 
 def load_module():
@@ -21,6 +22,7 @@ def load_module():
         raise AssertionError("unable to load run_book_pipeline.py")
 
     module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(SRC_DIR))
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
