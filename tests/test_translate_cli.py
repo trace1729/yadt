@@ -1,0 +1,99 @@
+import contextlib
+import importlib.util
+import io
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+
+def load_translate_cli_module(test_case: unittest.TestCase):
+    module_path = Path(__file__).resolve().parent.parent / "translate_text_cli.py"
+    if not module_path.exists():
+        test_case.fail("translate_text_cli.py is missing")
+
+    spec = importlib.util.spec_from_file_location("translate_text_cli", module_path)
+    if spec is None or spec.loader is None:
+        test_case.fail("Unable to load translate_text_cli.py")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TranslateCliTests(unittest.TestCase):
+    def test_main_outputs_translation_only_by_default(self):
+        module = load_translate_cli_module(self)
+        client = Mock()
+        client.chat.completions.create.return_value = Mock(
+            choices=[Mock(message=Mock(content="你好，世界。"))]
+        )
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text('DEEPSEEK_API_KEY="test-key"\n', encoding="utf-8")
+            with patch.object(module, "create_client", return_value=client):
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exit_code = module.main(["Hello world"], env_path=env_path)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "你好，世界。\n")
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_main_outputs_translation_pronunciation_and_example_in_verbose_mode(self):
+        module = load_translate_cli_module(self)
+        client = Mock()
+        client.chat.completions.create.return_value = Mock(
+            choices=[
+                Mock(
+                    message=Mock(
+                        content=(
+                            '{"translation":"你好，世界。","pronunciation":"ni hao, shi jie",'
+                            '"example":"你好，世界。今天真安静。"}'
+                        )
+                    )
+                )
+            ]
+        )
+
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            env_path.write_text('DEEPSEEK_API_KEY="test-key"\n', encoding="utf-8")
+            with patch.object(module, "create_client", return_value=client):
+                with contextlib.redirect_stdout(stdout):
+                    exit_code = module.main(["--verbose", "Hello world"], env_path=env_path)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "Translation: 你好，世界。\nPronunciation: ni hao, shi jie\nExample: 你好，世界。今天真安静。\n",
+        )
+
+    def test_main_returns_error_when_api_key_is_missing(self):
+        module = load_translate_cli_module(self)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env_path = Path(tmp_dir) / ".env"
+            previous = os.environ.pop("DEEPSEEK_API_KEY", None)
+            try:
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    exit_code = module.main(["Hello world"], env_path=env_path)
+            finally:
+                if previous is not None:
+                    os.environ["DEEPSEEK_API_KEY"] = previous
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("DEEPSEEK_API_KEY", stderr.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

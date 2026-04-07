@@ -1,0 +1,8 @@
+.env
+__pycache__/
+tests/__pycache__/
+output/
+.venv/
+.vscode/
+.epub_image_cache/
+docs/
