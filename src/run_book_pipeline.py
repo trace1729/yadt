@@ -19,6 +19,8 @@ from translate_markdown_book import create_client, load_api_key, run_translation
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_MAX_CHARS_PER_CHUNK = 6000
 DEFAULT_AUTHOR = "Unknown Author"
+
+
 @dataclass(frozen=True)
 class PipelinePaths:
     markdown_path: Path
@@ -68,6 +70,70 @@ def read_input_metadata(input_path: Path) -> BookMetadata:
     return BookMetadata(title=title, author=DEFAULT_AUTHOR, bilingual_title=build_bilingual_title(title))
 
 
+def convert_source_to_markdown(input_path: Path, output_path: Path | None = None) -> Path:
+    target_path = output_path or derive_output_paths(input_path).markdown_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path.suffix.lower() == ".pdf":
+        mineru_api_key = load_mineru_api_key()
+        if not mineru_api_key:
+            raise SystemExit("Missing MINERU_API_KEY; set the env var or add it to .env")
+        convert_pdf_to_markdown(input_path, target_path, api_key=mineru_api_key)
+        return target_path
+
+    convert_epub_to_markdown(input_path, target_path)
+    fixed_markdown = fix_special_toc_headings(target_path.read_text(encoding="utf-8"))
+    target_path.write_text(fixed_markdown, encoding="utf-8")
+    return target_path
+
+
+def translate_markdown_file(
+    input_path: Path,
+    output_path: Path,
+    cache_path: Path,
+    *,
+    model: str = DEFAULT_MODEL,
+    max_chars_per_chunk: int = DEFAULT_MAX_CHARS_PER_CHUNK,
+    max_workers: int = 3,
+    resume: bool = True,
+    output_mode: str = "bilingual",
+) -> Path:
+    api_key = load_api_key()
+    if not api_key:
+        raise SystemExit("Missing DEEPSEEK_API_KEY; set the env var or add it to .env")
+
+    client = create_client(api_key)
+    run_translation_pipeline(
+        input_path=input_path,
+        output_path=output_path,
+        client=client,
+        model=model,
+        max_chars_per_chunk=max_chars_per_chunk,
+        cache_path=cache_path,
+        resume=resume,
+        max_workers=max_workers,
+        output_mode=output_mode,
+    )
+    return output_path
+
+
+def cleanup_markdown_file(path: Path) -> Path:
+    processed_markdown = postprocess_markdown(path.read_text(encoding="utf-8"))
+    path.write_text(processed_markdown, encoding="utf-8")
+    return path
+
+
+def export_markdown_to_epub(
+    input_path: Path,
+    output_path: Path,
+    *,
+    title: str,
+    author: str,
+) -> Path:
+    write_epub(input_path, output_path, title=title, author=author)
+    return output_path
+
+
 def run_pipeline(
     input_path: Path,
     *,
@@ -94,37 +160,19 @@ def run_pipeline(
         bilingual_title=build_bilingual_title(title or source_metadata.title),
     )
 
-    if input_path.suffix.lower() == ".pdf":
-        mineru_api_key = load_mineru_api_key()
-        if not mineru_api_key:
-            raise SystemExit("Missing MINERU_API_KEY; set the env var or add it to .env")
-        convert_pdf_to_markdown(input_path, paths.markdown_path, api_key=mineru_api_key)
-    else:
-        convert_epub_to_markdown(input_path, paths.markdown_path)
-        fixed_markdown = fix_special_toc_headings(paths.markdown_path.read_text(encoding="utf-8"))
-        paths.markdown_path.write_text(fixed_markdown, encoding="utf-8")
-
-    api_key = load_api_key()
-    if not api_key:
-        raise SystemExit("Missing DEEPSEEK_API_KEY; set the env var or add it to .env")
-
-    client = create_client(api_key)
-    run_translation_pipeline(
-        input_path=paths.markdown_path,
-        output_path=paths.bilingual_markdown_path,
-        client=client,
+    convert_source_to_markdown(input_path, paths.markdown_path)
+    translate_markdown_file(
+        paths.markdown_path,
+        paths.bilingual_markdown_path,
+        paths.cache_path,
         model=model,
         max_chars_per_chunk=max_chars_per_chunk,
-        cache_path=paths.cache_path,
-        resume=resume,
         max_workers=max_workers,
+        resume=resume,
         output_mode="bilingual",
     )
-
-    processed_markdown = postprocess_markdown(paths.bilingual_markdown_path.read_text(encoding="utf-8"))
-    paths.bilingual_markdown_path.write_text(processed_markdown, encoding="utf-8")
-
-    write_epub(
+    cleanup_markdown_file(paths.bilingual_markdown_path)
+    export_markdown_to_epub(
         paths.bilingual_markdown_path,
         paths.bilingual_epub_path,
         title=metadata.bilingual_title,

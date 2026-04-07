@@ -12,23 +12,51 @@ from translate_markdown_book import create_client, load_api_key
 DEFAULT_MODEL = "deepseek-chat"
 
 
+def build_translation_prompt(
+    *,
+    from_lang: str = "English",
+    to_lang: str = "Simplified Chinese",
+    title_prompt: str = "",
+    summary_prompt: str = "",
+    terms_prompt: str = "",
+) -> str:
+    return (
+        f"{from_lang}→ {to_lang},仅输出译文\n"
+        "要求:\n"
+        f"1.  符合{to_lang}母语者表达习惯\n"
+        "2.  根据语境灵活转换语气，译文传情达意\n"
+        f"3.  {to_lang}受众易懂的地道表达\n"
+        "4.  意译而非直译，专业内容保证术语准确\n"
+        "5.  参考:\n"
+        f"    {title_prompt}\n"
+        f"    {summary_prompt}\n"
+        f"    {terms_prompt}\n"
+        "待译:\n"
+        "{{text}}\n"
+        "[仅输出译文，**无需任何**说明，注解，注释，解释]"
+    )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Translate one English string to Simplified Chinese.")
-    parser.add_argument("text", help="English text to translate")
+    parser.add_argument("text", nargs="?", help="English text to translate")
+    parser.add_argument("--raw", action="store_true", help="Translate raw text from a txt file, stdin, or direct input")
+    parser.add_argument("--input", dest="input_path", help="Path to a txt file for raw mode")
+    parser.add_argument("-o", "--output", dest="output_path", help="Optional output path for raw mode")
     parser.add_argument("-v", "--verbose", action="store_true", help="Include pronunciation and an example sentence")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="DeepSeek model name")
     return parser.parse_args(argv)
 
 
 def translate_text(client, text: str, model: str) -> str:
+    prompt = build_translation_prompt()
     response = client.chat.completions.create(
         model=model,
         messages=[
             {
                 "role": "system",
-                "content": "You translate English into natural Simplified Chinese. Return only the translated Chinese text.",
+                "content": prompt.replace("{{text}}", text),
             },
-            {"role": "user", "content": text},
         ],
         temperature=0.2,
     )
@@ -61,6 +89,11 @@ def translate_text_verbose(client, text: str, model: str) -> dict[str, str]:
     return parse_verbose_response(response.choices[0].message.content)
 
 
+def translate_text_bilingual(client, text: str, model: str) -> str:
+    translation = translate_text(client, text, model)
+    return f"{text.strip()}\n\n{translation}"
+
+
 def parse_verbose_response(content: str) -> dict[str, str]:
     try:
         payload = json.loads(content)
@@ -83,6 +116,14 @@ def format_verbose_output(payload: dict[str, str]) -> str:
     )
 
 
+def resolve_raw_text(args: argparse.Namespace) -> str:
+    if args.input_path:
+        return Path(args.input_path).read_text(encoding="utf-8")
+    if args.text:
+        return args.text
+    return sys.stdin.read()
+
+
 def main(argv: Sequence[str] | None = None, env_path: Path | None = None) -> int:
     args = parse_args(argv)
     api_key = load_api_key(env_path)
@@ -92,10 +133,26 @@ def main(argv: Sequence[str] | None = None, env_path: Path | None = None) -> int
 
     try:
         client = create_client(api_key)
-        if args.verbose:
+        if args.raw:
+            raw_text = resolve_raw_text(args)
+            if not raw_text.strip():
+                print("Raw mode requires input text, --input, or stdin.", file=sys.stderr)
+                return 1
+            bilingual_text = translate_text_bilingual(client, raw_text, model=args.model)
+            if args.output_path:
+                Path(args.output_path).write_text(f"{bilingual_text}\n", encoding="utf-8")
+            else:
+                print(bilingual_text)
+        elif args.verbose:
+            if not args.text:
+                print("Missing input text.", file=sys.stderr)
+                return 1
             payload = translate_text_verbose(client, args.text, model=args.model)
             print(format_verbose_output(payload))
         else:
+            if not args.text:
+                print("Missing input text.", file=sys.stderr)
+                return 1
             print(translate_text(client, args.text, model=args.model))
     except Exception as error:
         print(f"Translation failed: {error}", file=sys.stderr)

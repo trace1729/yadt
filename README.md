@@ -4,6 +4,7 @@
 
 仓库当前提供的是一组小而清晰的脚本：
 
+- `src/staged_pipeline_cli.py`: 分阶段子命令入口，支持 `pdf2markdown`、`epub2markdown`、`pdf2epub`、`translate_epub`
 - `src/run_book_pipeline.py`: 一键执行 `epub -> markdown -> heading fix -> translate -> cleanup -> epub`
 - `src/convert_epub_to_markdown.py`: 将 EPUB 转成 Markdown，并导出图片资源
 - `src/convert_pdf_to_markdown.py`: 通过 MinerU 云 API 将 PDF 转成 Markdown，并导出图片资源
@@ -36,13 +37,22 @@ export MINERU_API_KEY="your_mineru_api_key"
 
 ## Quick Start
 
-完整处理一本 EPUB 或 PDF：
+使用新的分阶段子命令：
+
+```bash
+./.venv/bin/python src/staged_pipeline_cli.py pdf2markdown "/path/to/paper.pdf"
+./.venv/bin/python src/staged_pipeline_cli.py pdf2markdown "/path/to/paper.pdf" --translate --bilingual --max-workers 16
+./.venv/bin/python src/staged_pipeline_cli.py epub2markdown "/path/to/book.epub"
+./.venv/bin/python src/staged_pipeline_cli.py epub2markdown "/path/to/book.epub" --translate --bilingual --max-workers 16
+./.venv/bin/python src/staged_pipeline_cli.py pdf2epub "/path/to/paper.pdf"
+./.venv/bin/python src/staged_pipeline_cli.py pdf2epub "/path/to/paper.pdf" --translate --bilingual --max-workers 16
+./.venv/bin/python src/staged_pipeline_cli.py translate_epub "/path/to/book.epub" --max-workers 16
+```
+
+兼容的一键全流程命令仍然可用：
 
 ```bash
 ./.venv/bin/python src/run_book_pipeline.py "/path/to/book.epub" --max-workers 16
-```
-
-```bash
 ./.venv/bin/python src/run_book_pipeline.py "/path/to/paper.pdf" --max-workers 16
 ```
 
@@ -185,11 +195,20 @@ output/<book>/<book>.translation_cache.json
 ```bash
 ./.venv/bin/python src/translate_text_cli.py "Hello world"
 ./.venv/bin/python src/translate_text_cli.py --verbose "Hello world"
+./.venv/bin/python src/translate_text_cli.py --raw --input notes.txt --output notes.bilingual.txt
+cat notes.txt | ./.venv/bin/python src/translate_text_cli.py --raw
 ```
 
 默认只输出译文。
 
 `--verbose` 还会输出 pronunciation 和 example sentence。
+
+`--raw` 会输出双语纯文本：
+
+- 传入 `--input` 时读取 `.txt` 文件
+- 不传 `--input` 时优先读取位置参数文本，否则读取 stdin
+- 传入 `--output` 时写入双语 `.txt`
+- 不传 `--output` 时直接打印到终端
 
 ## Naming Notes
 
@@ -201,13 +220,15 @@ output/<book>/<book>.translation_cache.json
 
 ## Recommended Workflow
 
-对于普通 EPUB 或 PDF：
+推荐优先使用分阶段子命令：
 
 ```bash
-./.venv/bin/python src/run_book_pipeline.py "/path/to/book.epub" --max-workers 16
+./.venv/bin/python src/staged_pipeline_cli.py pdf2markdown "/path/to/paper.pdf"
+./.venv/bin/python src/staged_pipeline_cli.py pdf2epub "/path/to/paper.pdf" --translate --bilingual --max-workers 16
+./.venv/bin/python src/staged_pipeline_cli.py translate_epub "/path/to/book.epub" --max-workers 16
 ```
 
-对于已知存在特殊目录链接的 EPUB：
+兼容入口仍适合“直接全跑完”的场景：
 
 `src/run_book_pipeline.py` 对 EPUB 会内置 `src/fix_special_toc_links.py` 这一步；PDF 输入不会额外跑这一步。
 
