@@ -1,4 +1,4 @@
-# Bilingual Book Pipeline
+# YAET: Yet Another epub Translator
 
 将 EPUB 或 Markdown 书稿转换成中英对照 Markdown，并可重新导出为 EPUB。
 
