@@ -4,7 +4,7 @@
 
 仓库当前提供的是一组小而清晰的脚本：
 
-- `src/yaet_cli.py`: 统一 CLI 入口，支持 `pdf2markdown`、`epub2markdown`、`pdf2epub`、`epub2epub`、`translate`
+- `src/yaet_cli.py`: 统一 CLI 入口，支持 `pdf2md`、`epub2md`、`md2md`、`pdf2epub`、`epub2epub`、`translate`
 - `src/run_book_pipeline.py`: 一键执行 `epub -> markdown -> heading fix -> translate -> cleanup -> epub`
 
 
@@ -68,10 +68,12 @@ export PATH="$HOME/.local/bin:$PATH"
 使用新的分阶段子命令：
 
 ```bash
-./yaet pdf2markdown "/path/to/paper.pdf"
-./yaet pdf2markdown "/path/to/paper.pdf" --translate --bilingual --max-workers 16
-./yaet epub2markdown "/path/to/book.epub"
-./yaet epub2markdown "/path/to/book.epub" --translate --bilingual --max-workers 16
+./yaet pdf2md "/path/to/paper.pdf"
+./yaet pdf2md "/path/to/paper.pdf" --translate --bilingual --max-workers 16
+./yaet epub2md "/path/to/book.epub"
+./yaet epub2md "/path/to/book.epub" --translate --bilingual --max-workers 16
+./yaet md2md "/path/to/book.md"
+./yaet md2md "/path/to/book.md" --translate --bilingual --max-workers 16
 ./yaet pdf2epub "/path/to/paper.pdf"
 ./yaet pdf2epub "/path/to/paper.pdf" --translate --bilingual --max-workers 16
 ./yaet epub2epub "/path/to/book.epub" --max-workers 16
@@ -262,7 +264,7 @@ cat notes.txt | ./.venv/bin/python src/translate_text_cli.py --bilingual
 推荐优先使用分阶段子命令：
 
 ```bash
-./yaet pdf2markdown "/path/to/paper.pdf"
+./yaet pdf2md "/path/to/paper.pdf"
 ./yaet pdf2epub "/path/to/paper.pdf" --translate --bilingual --max-workers 16
 ./yaet epub2epub "/path/to/book.epub" --max-workers 16
 ```

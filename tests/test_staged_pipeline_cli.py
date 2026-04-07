@@ -49,9 +49,9 @@ class StagedPipelineCliTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("pdf2markdown", result.stdout)
+        self.assertIn("pdf2md", result.stdout)
 
-    def test_pdf2markdown_without_translation_only_converts_pdf(self):
+    def test_pdf2md_without_translation_only_converts_pdf(self):
         module = load_module()
         events: list[str] = []
 
@@ -70,14 +70,14 @@ class StagedPipelineCliTests(unittest.TestCase):
             with patch.object(module.pipeline, "convert_source_to_markdown", side_effect=fake_convert_source_to_markdown), patch.object(
                 module.pipeline, "translate_markdown_file"
             ) as translate_mock, patch.object(module.pipeline, "cleanup_markdown_file") as cleanup_mock:
-                exit_code = module.main(["pdf2markdown", str(input_path)])
+                exit_code = module.main(["pdf2md", str(input_path)])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(events, ["convert"])
         translate_mock.assert_not_called()
         cleanup_mock.assert_not_called()
 
-    def test_pdf2markdown_with_translate_bilingual_runs_translation_and_cleanup(self):
+    def test_pdf2md_with_translate_bilingual_runs_translation_and_cleanup(self):
         module = load_module()
         events: list[str] = []
 
@@ -107,10 +107,61 @@ class StagedPipelineCliTests(unittest.TestCase):
             with patch.object(module.pipeline, "convert_source_to_markdown", side_effect=fake_convert_source_to_markdown), patch.object(
                 module.pipeline, "translate_markdown_file", side_effect=fake_translate_markdown_file
             ), patch.object(module.pipeline, "cleanup_markdown_file", side_effect=fake_cleanup_markdown_file):
-                exit_code = module.main(["pdf2markdown", str(input_path), "--translate", "--bilingual"])
+                exit_code = module.main(["pdf2md", str(input_path), "--translate", "--bilingual"])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(events, ["convert", "translate", "cleanup"])
+
+    def test_md2md_without_translation_copies_markdown_to_output_location(self):
+        module = load_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "notes.md"
+            input_path.write_text("# Notes\n\nHello.\n", encoding="utf-8")
+            output_path = module.pipeline.derive_output_paths(input_path).markdown_path
+
+            with patch.object(module.pipeline, "translate_markdown_file") as translate_mock, patch.object(
+                module.pipeline, "cleanup_markdown_file"
+            ) as cleanup_mock:
+                exit_code = module.main(["md2md", str(input_path)])
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "# Notes\n\nHello.\n")
+
+        self.assertEqual(exit_code, 0)
+        translate_mock.assert_not_called()
+        cleanup_mock.assert_not_called()
+
+    def test_md2md_with_translate_bilingual_runs_translation_and_cleanup(self):
+        module = load_module()
+        events: list[str] = []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "notes.md"
+            input_path.write_text("# Notes\n\nHello.\n", encoding="utf-8")
+            paths = module.pipeline.derive_output_paths(input_path)
+
+            def fake_translate_markdown_file(input_value, output_path, cache_path, **kwargs):
+                events.append("translate")
+                self.assertEqual(input_value, paths.markdown_path)
+                self.assertEqual(input_value.read_text(encoding="utf-8"), "# Notes\n\nHello.\n")
+                output_path.write_text("# Notes\n\n# 笔记\n", encoding="utf-8")
+                cache_path.write_text("{}", encoding="utf-8")
+                return output_path
+
+            def fake_cleanup_markdown_file(path):
+                events.append("cleanup")
+                path.write_text("# Notes (笔记)\n", encoding="utf-8")
+                return path
+
+            with patch.object(module.pipeline, "translate_markdown_file", side_effect=fake_translate_markdown_file), patch.object(
+                module.pipeline, "cleanup_markdown_file", side_effect=fake_cleanup_markdown_file
+            ):
+                exit_code = module.main(["md2md", str(input_path), "--translate", "--bilingual"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(events, ["translate", "cleanup"])
 
     def test_epub2epub_produces_bilingual_epub(self):
         module = load_module()

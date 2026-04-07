@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 from typing import Sequence
 
@@ -13,8 +14,9 @@ def parse_args(argv: Sequence[str] | None = None) -> tuple[argparse.Namespace, l
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     markdown_commands = {
-        "pdf2markdown": "Convert a PDF to Markdown, optionally translating it.",
-        "epub2markdown": "Convert an EPUB to Markdown, optionally translating it.",
+        "pdf2md": "Convert a PDF to Markdown, optionally translating it.",
+        "epub2md": "Convert an EPUB to Markdown, optionally translating it.",
+        "md2md": "Normalize or translate an existing Markdown file.",
     }
     for name, description in markdown_commands.items():
         subparser = subparsers.add_parser(name, description=description)
@@ -78,6 +80,14 @@ def _translate_and_maybe_cleanup(markdown_path: Path, paths: pipeline.PipelinePa
     return translated_path
 
 
+def _prepare_markdown_input(input_path: Path, output_path: Path | None, paths: pipeline.PipelinePaths) -> Path:
+    markdown_output = Path(output_path) if output_path else paths.markdown_path
+    markdown_output.parent.mkdir(parents=True, exist_ok=True)
+    if input_path.resolve() != markdown_output.resolve():
+        shutil.copyfile(input_path, markdown_output)
+    return markdown_output
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args, extra_args = parse_args(argv)
 
@@ -88,9 +98,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths = pipeline.derive_output_paths(input_path)
     metadata = pipeline.read_input_metadata(input_path)
 
-    if args.command in {"pdf2markdown", "epub2markdown"}:
+    if args.command in {"pdf2md", "epub2md"}:
         markdown_output = Path(args.output_path) if args.output_path else paths.markdown_path
         markdown_path = pipeline.convert_source_to_markdown(input_path, markdown_output)
+        if not args.translate:
+            return 0
+        _translate_and_maybe_cleanup(markdown_path, paths, args)
+        return 0
+
+    if args.command == "md2md":
+        markdown_path = _prepare_markdown_input(input_path, args.output_path, paths)
         if not args.translate:
             return 0
         _translate_and_maybe_cleanup(markdown_path, paths, args)
