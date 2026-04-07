@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Sequence
 
+from env_utils import load_key_from_dotenv
 from output_paths import book_output_dir, canonical_book_name, sanitize_book_dir_name
 
 GLOSSARY = {
@@ -339,19 +340,7 @@ def load_api_key(env_path: Path | None = None) -> str | None:
     if api_key:
         return api_key
 
-    dotenv_path = env_path or Path(".env")
-    if not dotenv_path.exists():
-        return None
-
-    for line in dotenv_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        if key.strip() == "DEEPSEEK_API_KEY":
-            return value.strip().strip('"').strip("'")
-
-    return None
+    return load_key_from_dotenv("DEEPSEEK_API_KEY", __file__, env_path)
 
 
 def _compute_heading_map(blocks: Sequence[Block]) -> Dict[int, str | None]:

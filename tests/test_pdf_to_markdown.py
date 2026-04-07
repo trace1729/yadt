@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import sys
 import tempfile
 import unittest
@@ -41,6 +42,27 @@ class PdfToMarkdownTests(unittest.TestCase):
 
             with patch.dict(module.os.environ, {}, clear=True):
                 self.assertEqual(module.load_mineru_api_key(env_path), "mineru-key")
+
+    def test_load_mineru_api_key_falls_back_to_repo_dotenv_when_cwd_differs(self):
+        module = load_module()
+        repo_env_path = PROJECT_ROOT / ".env"
+        original_content = repo_env_path.read_text(encoding="utf-8") if repo_env_path.exists() else None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            previous_cwd = Path.cwd()
+            previous = os.environ.pop("MINERU_API_KEY", None)
+            try:
+                repo_env_path.write_text('MINERU_API_KEY="repo-mineru-key"\n', encoding="utf-8")
+                os.chdir(tmp_dir)
+                self.assertEqual(module.load_mineru_api_key(), "repo-mineru-key")
+            finally:
+                os.chdir(previous_cwd)
+                if original_content is None:
+                    repo_env_path.unlink(missing_ok=True)
+                else:
+                    repo_env_path.write_text(original_content, encoding="utf-8")
+                if previous is not None:
+                    os.environ["MINERU_API_KEY"] = previous
 
     def test_convert_pdf_to_markdown_downloads_zip_assets_and_rewrites_markdown_paths(self):
         module = load_module()

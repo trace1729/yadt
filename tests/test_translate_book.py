@@ -223,6 +223,26 @@ class PipelineTests(unittest.TestCase):
                 if previous is not None:
                     os.environ["DEEPSEEK_API_KEY"] = previous
 
+    def test_load_api_key_falls_back_to_repo_dotenv_when_cwd_differs(self):
+        repo_env_path = PROJECT_ROOT / ".env"
+        original_content = repo_env_path.read_text(encoding="utf-8") if repo_env_path.exists() else None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            previous_cwd = Path.cwd()
+            previous = os.environ.pop("DEEPSEEK_API_KEY", None)
+            try:
+                repo_env_path.write_text('DEEPSEEK_API_KEY="repo-dotenv-key"\n', encoding="utf-8")
+                os.chdir(tmp_dir)
+                self.assertEqual(load_api_key(), "repo-dotenv-key")
+            finally:
+                os.chdir(previous_cwd)
+                if original_content is None:
+                    repo_env_path.unlink(missing_ok=True)
+                else:
+                    repo_env_path.write_text(original_content, encoding="utf-8")
+                if previous is not None:
+                    os.environ["DEEPSEEK_API_KEY"] = previous
+
     def test_run_translation_pipeline_writes_bilingual_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             input_path = Path(tmp_dir) / "input.md"

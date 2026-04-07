@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -33,6 +34,22 @@ def load_module():
 class StagedPipelineCliTests(unittest.TestCase):
     def test_wrapper_script_exists(self):
         self.assertTrue(WRAPPER_PATH.exists())
+
+    def test_wrapper_script_resolves_repo_root_when_invoked_via_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            symlink_path = tmp_path / "yaet"
+            symlink_path.symlink_to(WRAPPER_PATH)
+
+            result = subprocess.run(
+                [str(symlink_path), "--help"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("pdf2markdown", result.stdout)
 
     def test_pdf2markdown_without_translation_only_converts_pdf(self):
         module = load_module()

@@ -15,6 +15,7 @@ try:
 except ImportError:
     requests = SimpleNamespace(post=None, get=None, put=None)
 
+from env_utils import load_key_from_dotenv
 from output_paths import book_output_dir, canonical_book_name, sanitize_book_dir_name
 
 
@@ -31,21 +32,7 @@ def load_mineru_api_key(env_path: Path | None = None) -> str | None:
     if api_key:
         return api_key
 
-    dotenv_path = env_path or Path(".env")
-    if not dotenv_path.exists():
-        return None
-
-    for line in dotenv_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        if key.strip() != "MINERU_API_KEY":
-            continue
-        cleaned = value.strip().strip('"').strip("'")
-        if cleaned:
-            return cleaned
-    return None
+    return load_key_from_dotenv("MINERU_API_KEY", __file__, env_path)
 
 
 def convert_pdf_to_markdown(

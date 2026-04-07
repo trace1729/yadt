@@ -6,15 +6,7 @@
 
 - `src/yaet_cli.py`: 统一 CLI 入口，支持 `pdf2markdown`、`epub2markdown`、`pdf2epub`、`epub2epub`、`translate`
 - `src/run_book_pipeline.py`: 一键执行 `epub -> markdown -> heading fix -> translate -> cleanup -> epub`
-- `src/convert_epub_to_markdown.py`: 将 EPUB 转成 Markdown，并导出图片资源
-- `src/convert_pdf_to_markdown.py`: 通过 MinerU 云 API 将 PDF 转成 Markdown，并导出图片资源
-- `src/translate_markdown_book.py`: 将 Markdown 翻译成中英对照或纯中文 Markdown
-- `src/cleanup_bilingual_markdown.py`: 合并双语标题、更新目录链接、去除重复图片和分隔符
-- `src/fix_special_toc_links.py`: 修复特殊目录链接 edge case，例如 `STATE CHANGE -> #STATE_CHANGE`
-- `src/convert_markdown_to_epub.py`: 将 Markdown 转回 EPUB，并保留粗体、斜体和封面
-- `src/monitor_translation_progress.py`: 查看翻译缓存进度
-- `src/translate_text_cli.py`: 单句或短文本翻译 CLI
-- `src/output_paths.py`: 统一输出路径规则
+
 
 ## Install
 
@@ -38,6 +30,38 @@ export MINERU_API_KEY="your_mineru_api_key"
 仓库根目录还提供了一个包装脚本：
 
 - `./yaet`: 调用 `src/yaet_cli.py` 的便捷入口
+
+## Run From Anywhere
+
+可以，只要调用仓库根目录下的 `yaet` 包装脚本即可。它会自动定位仓库内的 `src/` 和 `.venv/`，并且现在也会自动回退读取仓库根目录下的 `.env`。
+
+直接使用绝对路径：
+
+```bash
+/path/to/repo/yaet translate "Hello world"
+/path/to/repo/yaet epub2epub "/abs/path/book.epub" --max-workers 16
+```
+
+也可以把仓库目录加入 `PATH`：
+
+```bash
+export PATH="/path/to/repo:$PATH"
+yaet translate "Hello world"
+```
+
+如果希望长期可用，更推荐加一个软链接：
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf /path/to/repo/yaet ~/.local/bin/yaet
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+跨目录执行时建议：
+
+- 输入文件尽量使用绝对路径
+- API key 放在仓库根目录 `.env`，或直接导出到环境变量
+- 输出仍然默认写到输入文件旁边的 `output/<Book_Name_With_Underscores>/`
 
 ## Quick Start
 
